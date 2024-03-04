@@ -1,0 +1,18 @@
+[package]
+name = "motd"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/shell-pool/motd"
+authors = ["Ethan Pailes <pailes@google.com>"]
+readme = "../README.md"
+description = '''
+motd interrogates pam_motd.so in order to determine the current
+message of the day. It only works on linux and it is a component of
+the shpool tool, though you can also use the dump-motd wrapper CLI
+tool directly.
+'''
+license = "Apache-2.0"
+keywords = ["motd", "ssh", "terminal", "shell"]
+
+[dependencies]
+

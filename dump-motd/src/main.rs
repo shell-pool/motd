@@ -1,8 +1,11 @@
-use motd;
-
 fn main() {
-    match motd::value() {
+    motd::handle_reexec();
+
+    match motd::value(
+        motd::PamMotdResolutionStrategy::Auto,
+        motd::ArgResolutionStrategy::Auto,
+    ) {
         Ok(v) => print!("{}", v),
-        Err(e) => eprintln!("Error getting motd: {:?}", e),
+        Err(e) => eprintln!("Error getting motd: {}", e),
     }
 }

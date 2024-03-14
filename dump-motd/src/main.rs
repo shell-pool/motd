@@ -1,11 +1,16 @@
 fn main() {
     motd::handle_reexec();
 
-    match motd::value(
-        motd::PamMotdResolutionStrategy::Auto,
-        motd::ArgResolutionStrategy::Auto,
-    ) {
-        Ok(v) => print!("{}", v),
-        Err(e) => eprintln!("Error getting motd: {}", e),
+    if let Err(e) = run() {
+        eprintln!("Error getting motd: {}", e);
     }
+}
+
+fn run() -> Result<(), motd::Error> {
+    let motd_resolver = motd::Resolver::new(motd::PamMotdResolutionStrategy::Auto)?;
+    print!(
+        "{}",
+        motd_resolver.value(motd::ArgResolutionStrategy::Auto)?
+    );
+    Ok(())
 }

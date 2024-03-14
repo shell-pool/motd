@@ -1,0 +1,3 @@
+LIBPAM_MODUTIL_1.0 {
+    pam_modutil_getpwnam;
+};

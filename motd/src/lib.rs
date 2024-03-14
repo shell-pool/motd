@@ -14,7 +14,7 @@ Your main should look like this:
 fn main() {
     motd::handle_reexec();
 
-    ...
+    // ...
 }
 ```
 
@@ -22,10 +22,16 @@ then elsewhere in your code you can call value to get
 the motd message like
 
 ```
-motd::value(motd::PamMotdResolutionStrategy::Auto,
-            motd::ArgResolutionStrategy::Auto)?;
+# fn main() -> Result<(), motd::Error> {
+# motd::handle_reexec();
+let motd_resolver = motd::Resolver::new(motd::PamMotdResolutionStrategy::Auto)?;
+let motd_msg = motd_resolver.value(motd::ArgResolutionStrategy::Auto)?;
+# Ok(())
+# }
 ```
 */
+
+#![allow(clippy::needless_doctest_main)]
 
 // We use pam-sys directly rather than higher level wrapper crates
 // like pam or pam-client because we are only going to use libpam
@@ -46,12 +52,10 @@ use std::{
     ptr, slice,
 };
 
-use libc;
+use dlopen2::wrapper::WrapperApi;
 use log::warn;
-use pam_sys;
 use pam_sys::types::{PamMessageStyle, PamReturnCode};
 use serde_derive::{Deserialize, Serialize};
-use dlopen2::wrapper::WrapperApi;
 
 macro_rules! merr {
     ($($arg:tt)*) => {{
@@ -63,45 +67,65 @@ const PAM_MOTD_NAME: &str = "pam_motd.so";
 const LIB_DIR: &str = "/usr/lib";
 const PAM_DIR: [&str; 2] = ["/etc", "pam.d"];
 
-const SO_RESOLVER_ARG_ENV_VAR: &str = "RUST_MOTD_CRATE__INTERNAL__SO_RESOLVER_ARG";
+const PAM_MOTD_SO_ARG_ENV_VAR: &str = "RUST_MOTD_CRATE__INTERNAL__PAM_MOTD_SO_ARG";
 const ARG_RESOLVER_ARG_ENV_VAR: &str = "RUST_MOTD_CRATE__INTERNAL__ARG_RESOLVER_ARG";
 
-/// Get the current value of the MOTD. Works by re-execing the current binary
-/// in order to use the LD_PRELOAD trick, so make sure you have called
-/// `motd::handle_reexec()` in your main function.
-pub fn value(
-    so_resolver: PamMotdResolutionStrategy,
-    arg_resolver: ArgResolutionStrategy,
-) -> Result<String, Error> {
-    let overlay_so = OverlaySo::new()?;
+/// Resolver knows how to fetch the current motd by re-execing
+/// the current binary to get handle_reexec to call pam_motd.so.
+#[derive(Debug, Clone)]
+pub struct Resolver {
+    pam_motd_so_path: PathBuf,
+}
 
-    let so_resolver_json =
-        serde_json::to_string(&so_resolver).map_err(|e| merr!("serializing so_resolver: {}", e))?;
-    let arg_resolver_json = serde_json::to_string(&arg_resolver)
-        .map_err(|e| merr!("serializing arg_resolver: {}", e))?;
-    let out = Command::new("/proc/self/exe")
-        .env(SO_RESOLVER_ARG_ENV_VAR, so_resolver_json)
-        .env(ARG_RESOLVER_ARG_ENV_VAR, arg_resolver_json)
-        .env("LD_PRELOAD", overlay_so.path())
-        .output()
-        .map_err(|e| merr!("error re-execing self: {}", e))?;
-
-    if !out.status.success() {
-        return Err(merr!("failed to re-exec, bad status = {}", out.status));
+impl Resolver {
+    /// Create a new Resolver based on the given strategy for
+    /// finding pam_motd.so. The path to the file will be cached
+    /// since some strategies for finding the shared library can
+    /// be fairly expensive.
+    pub fn new(so_finder: PamMotdResolutionStrategy) -> Result<Self, Error> {
+        Ok(Resolver {
+            pam_motd_so_path: so_finder.resolve()?,
+        })
     }
 
-    if out.stderr.len() > 0 {
-        println!("{}", String::from_utf8_lossy(out.stdout.as_slice()));
+    /// Get the current value of the motd. Works by re-execing
+    /// the current binary in order to use the LD_PRELOAD trick,
+    /// so make sure you have called `motd::handle_reexec()`
+    /// in your main function.
+    pub fn value(&self, arg_resolver: ArgResolutionStrategy) -> Result<String, Error> {
+        let overlay_so = OverlaySo::new()?;
 
-        let stderr = String::from_utf8_lossy(out.stderr.as_slice());
-        return Err(merr!("in re-execed process: {}", stderr));
+        let arg_resolver_json = serde_json::to_string(&arg_resolver)
+            .map_err(|e| merr!("serializing arg_resolver: {}", e))?;
+        let out = Command::new("/proc/self/exe")
+            .env(
+                PAM_MOTD_SO_ARG_ENV_VAR,
+                self.pam_motd_so_path
+                    .to_str()
+                    .ok_or(merr!("could not convert so path to str"))?,
+            )
+            .env(ARG_RESOLVER_ARG_ENV_VAR, arg_resolver_json)
+            .env("LD_PRELOAD", overlay_so.path())
+            .output()
+            .map_err(|e| merr!("error re-execing self: {}", e))?;
+
+        if !out.status.success() {
+            return Err(merr!("failed to re-exec, bad status = {}", out.status));
+        }
+
+        if !out.stderr.is_empty() {
+            println!("{}", String::from_utf8_lossy(out.stdout.as_slice()));
+
+            let stderr = String::from_utf8_lossy(out.stderr.as_slice());
+            return Err(merr!("in re-execed process: {}", stderr));
+        }
+
+        if !out.stdout.is_empty() {
+            return Ok(String::from_utf8_lossy(out.stdout.as_slice()).into());
+        }
+
+        Err(merr!("no motd output"))
     }
-
-    if out.stdout.len() > 0 {
-        return Ok(String::from_utf8_lossy(out.stdout.as_slice()).into());
-    }
-
-    Err(merr!("no motd output"))
 }
 
 /// You MUST call this routine in the main function of the binary that uses
@@ -111,11 +135,11 @@ pub fn value(
 /// and it is in this re-execd process that we actually load and call into
 /// `pam_motd.so`.
 pub fn handle_reexec() {
-    if let (Ok(so_resolver_json), Ok(arg_resolver_json)) = (
-        env::var(SO_RESOLVER_ARG_ENV_VAR),
+    if let (Ok(pam_motd_so), Ok(arg_resolver_json)) = (
+        env::var(PAM_MOTD_SO_ARG_ENV_VAR),
         env::var(ARG_RESOLVER_ARG_ENV_VAR),
     ) {
-        match reexec_call_so(so_resolver_json.as_str(), arg_resolver_json.as_str()) {
+        match reexec_call_so(pam_motd_so.as_str(), arg_resolver_json.as_str()) {
             Ok(motd_msg) => print!("{}", motd_msg),
             Err(e) => eprintln!("{}", e),
         }
@@ -124,20 +148,15 @@ pub fn handle_reexec() {
 }
 
 /// Actually load and call the `pam_motd.so`
-fn reexec_call_so(so_resolver_json: &str, arg_resolver_json: &str) -> Result<String, Error> {
-    let so_resolver: PamMotdResolutionStrategy = serde_json::from_str(so_resolver_json)
-        .map_err(|e| merr!("parsing so_resolver arg: {}", e))?;
+fn reexec_call_so(pam_motd_so: &str, arg_resolver_json: &str) -> Result<String, Error> {
+    let pam_motd_so = PathBuf::from(pam_motd_so);
     let arg_resolver: ArgResolutionStrategy = serde_json::from_str(arg_resolver_json)
         .map_err(|e| merr!("parsing arg_resolver arg: {}", e))?;
 
     let mut conv_data = ConvData::new();
     let pam_conv = pam_sys::types::PamConversation {
         conv: Some(conv_handler),
-        // Safety: It is always safe to cast to void in the immediate moment,
-        //         and we will be done with the conversation by the time this
-        //         routine returns and removes the underlying allocation from
-        //         the stack.
-        data_ptr: unsafe { mem::transmute::<_, *mut libc::c_void>(&mut conv_data) },
+        data_ptr: &mut conv_data as *mut ConvData as *mut libc::c_void,
     };
 
     let mut passwd_str_buf: [libc::c_char; 1024 * 4] = [0; 1024 * 4];
@@ -155,14 +174,20 @@ fn reexec_call_so(so_resolver_json: &str, arg_resolver_json: &str) -> Result<Str
     //         in man getpwuid.
     unsafe {
         let errno = libc::getpwuid_r(
-            libc::getuid(), &mut passwd,
-            passwd_str_buf.as_mut_ptr(), passwd_str_buf.len(),
-            &mut passwd_res_ptr as *mut *mut libc::passwd);
+            libc::getuid(),
+            &mut passwd,
+            passwd_str_buf.as_mut_ptr(),
+            passwd_str_buf.len(),
+            &mut passwd_res_ptr as *mut *mut libc::passwd,
+        );
         if passwd_res_ptr.is_null() {
             if errno == 0 {
                 return Err(merr!("could not find current user, should be impossible"));
             } else {
-                return Err(merr!("error resolving user passwd: {}", io::Error::from_raw_os_error(errno)));
+                return Err(merr!(
+                    "error resolving user passwd: {}",
+                    io::Error::from_raw_os_error(errno)
+                ));
             }
         }
     };
@@ -180,12 +205,11 @@ fn reexec_call_so(so_resolver_json: &str, arg_resolver_json: &str) -> Result<Str
 
     // Now the unsafe party really gets started! Time to directly dl_open
     // pam_motd.so.
-    let so_path = so_resolver.resolve()?;
 
     // Safety: pretty much just pure ffi around dlopen
-    let pam_motd_so: dlopen2::wrapper::Container<PamMotdSo> = unsafe {
-        dlopen2::wrapper::Container::load(&so_path)
-    }.map_err(|e| merr!("loading pam_motd.so: {}", e))?;
+    let pam_motd_so: dlopen2::wrapper::Container<PamMotdSo> =
+        unsafe { dlopen2::wrapper::Container::load(pam_motd_so) }
+            .map_err(|e| merr!("loading pam_motd.so: {}", e))?;
 
     let mut args = arg_resolver
         .resolve()?
@@ -268,10 +292,10 @@ impl PamHandle {
     ///
     /// Safety: see man pam_start for semantics. The Drop impl calls pam_end,
     ///         so the caller must keep that in mind.
-    unsafe fn start<'conv>(
+    unsafe fn start(
         service_name: *const libc::c_char,
         user: *const libc::c_char,
-        pam_conv: &'conv pam_sys::PamConversation,
+        pam_conv: &pam_sys::PamConversation,
     ) -> Result<Self, Error> {
         let mut pam_h: *const pam_sys::PamHandle = ptr::null();
 
@@ -302,10 +326,7 @@ impl std::ops::Drop for PamHandle {
             //         them to const pointers for most functions, presumably to
             //         signal that a pam_sys::PanHandle is an opaque type the user should
             //         never directly manipulate.
-            let code =
-                pam_sys::raw::pam_end(self.pam_h as *mut pam_sys::PamHandle, self.error_status);
-
-            code
+            pam_sys::raw::pam_end(self.pam_h as *mut pam_sys::PamHandle, self.error_status)
         };
         let code = PamReturnCode::from(code);
 
@@ -318,7 +339,6 @@ impl std::ops::Drop for PamHandle {
 //
 // .so file wrapper
 //
-
 
 #[derive(WrapperApi)]
 struct PamMotdSo {
@@ -392,6 +412,7 @@ extern "C" fn conv_handler(
     assert!(!appdata_ptr.is_null());
     let conv_data = unsafe { &mut *mem::transmute::<_, *mut ConvData>(appdata_ptr) };
 
+    #[allow(clippy::needless_range_loop)]
     for i in 0..(num_msg as usize) {
         // Safety: the caller is responsible for giving us a complete message list.
         //         Any issue with this operation would be due to an issue with how the
@@ -439,10 +460,6 @@ extern "C" fn conv_handler(
 //
 // .so discovery logic
 //
-// TODO(ethan): I should try to resolve the location of pam_motd.so
-//       the same way that ld does. It can clearly do it much
-//       faster than the recursive walk of /usr/lib that we are doing
-//       currently.
 
 /// Specifies the strategy to use in order to find the pam_motd.so file
 /// to interrogate for the motd message.
@@ -495,22 +512,18 @@ impl PamMotdResolutionStrategy {
             return Err(merr!("{:?} is not a directory", dir));
         }
 
-        for entry in fs::read_dir(&dir).map_err(|e| merr!("reading dir '{:?}': {:?}", dir, e))? {
-            let entry = entry.map_err(|e| merr!("getting dir entry for '{:?}': {:?}", dir, e))?;
-            let path = entry.path();
-
-            if path.is_symlink() {
-                continue;
-            }
-
-            if path.is_dir() && recursive {
-                if let Ok(res) = Self::find_file(recursive, path, fname) {
-                    return Ok(res);
-                }
-            } else if path.is_file() {
-                if path.file_name().map(|name| name == fname).unwrap_or(false) {
-                    return Ok(path);
-                }
+        let mut traversal = walkdir::WalkDir::new(&dir);
+        if !recursive {
+            traversal = traversal.max_depth(1);
+        }
+        for entry in traversal.into_iter().flatten() {
+            if entry
+                .path()
+                .file_name()
+                .map(|n| n == fname)
+                .unwrap_or(false)
+            {
+                return Ok(PathBuf::from(entry.path()));
             }
         }
 
@@ -628,7 +641,7 @@ impl ArgResolutionStrategy {
             if module != "pam_motd.so" {
                 continue;
             }
-            for arg in parts[3..].into_iter() {
+            for arg in &parts[3..] {
                 if *arg != "noupdate" {
                     args.push(String::from(*arg));
                 }

@@ -10,7 +10,6 @@ jobs:
       - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
         with:
           channel: '1.74.0'
-            # TODO: use rust to make the overlay shim so we don't need this
       - run: sudo apt-get install libpam0g-dev
       - run: cargo test --all-features
 
@@ -24,7 +23,6 @@ jobs:
         #       with:
         #         components: miri
         #         channel: nightly
-        #           # TODO: use rust to make the overlay shim so we don't need this
         #     - run: sudo apt-get install libpam0g-dev
         #     - run: MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test
 
@@ -49,7 +47,6 @@ jobs:
           components: clippy
           bins: cargo-cranky@0.3.0
           channel: nightly
-            # TODO: use rust to make the overlay shim so we don't need this
       - run: sudo apt-get install libpam0g-dev
       - run: cargo +nightly cranky --all-targets -- -D warnings
 
@@ -62,6 +59,5 @@ jobs:
         with:
           channel: '1.74.0'
           bins: cargo-deny
-            # TODO: use rust to make the overlay shim so we don't need this
       - run: sudo apt-get install libpam0g-dev
       - run: cargo deny --all-features check licenses

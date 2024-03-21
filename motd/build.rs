@@ -28,7 +28,7 @@ fn main() {
 // build the overlay .so file
 fn run() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=src/pam_motd_overlay.c");
-    println!("cargo:rerun-if-changed=src/pam_motd_overlay_versions.map");
+    println!("cargo:rerun-if-changed=src/pam_motd_overlay_versions.ldscript");
 
     let out_dir = env::var("OUT_DIR").map_err(|e| berr!("no OUT_DIR: {}", e))?;
 
@@ -37,7 +37,7 @@ fn run() -> Result<(), Error> {
 
     let cc = select_cc()?;
     let output = Command::new(cc)
-        .arg("-Wl,--version-script=./src/pam_motd_overlay_versions.map")
+        .arg("-Wl,--version-script=./src/pam_motd_overlay_versions.ldscript")
         .arg("-shared")
         .arg("-fPIC")
         .arg("-o")

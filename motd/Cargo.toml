@@ -1,6 +1,6 @@
 [package]
 name = "motd"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 repository = "https://github.com/shell-pool/motd"
 authors = ["Ethan Pailes <pailes@google.com>"]
@@ -9,7 +9,8 @@ description = '''
 motd interrogates pam_motd.so in order to determine the current
 message of the day. It only works on linux and it is a component of
 the shpool tool, though you can also use the dump-motd wrapper CLI
-tool directly.
+tool directly. Through feature selection, you can also use a
+pure rust impl with no dlopen shennigans.
 '''
 license = "Apache-2.0"
 keywords = ["motd", "ssh", "terminal", "shell"]

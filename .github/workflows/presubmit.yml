@@ -12,6 +12,7 @@ jobs:
           channel: '1.74.0'
       - run: sudo apt-get install libpam0g-dev
       - run: cargo test --all-features
+      - run: cargo test --no-default-features
 
         # TODO: miri has trouble with some of our IO, I think the re-exec causes issues
         # miri:

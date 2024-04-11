@@ -58,8 +58,6 @@ let motd_msg = motd_resolver.value(motd::ArgResolutionStrategy::Auto)?;
 ```
 */
 
-#![allow(clippy::needless_doctest_main)]
-
 use std::{
     fmt::Debug,
     fs, io,

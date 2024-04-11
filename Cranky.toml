@@ -1,0 +1,5 @@
+allow = [
+    "unknown_lints",
+    "clippy::needless_doctest_main",
+    "clippy::missing_transmute_annotations",
+]

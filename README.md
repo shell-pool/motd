@@ -7,7 +7,8 @@ crate.
 
 ## Dependencies
 
-You must install libpam headers to build this crate. On debian based
+If using the `socall` feature (which is on by default), you must
+install libpam headers to build this crate. On debian based
 systems you can do so with
 
 ```

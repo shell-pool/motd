@@ -27,6 +27,12 @@ fn main() {
 
 // build the overlay .so file
 fn run() -> Result<(), Error> {
+    // If the socall feature is not enabled, don't attempt to build
+    // the pam overlay.
+    if env::var("CARGO_FEATURE_SOCALL").is_err() {
+        return Ok(());
+    }
+
     println!("cargo:rerun-if-changed=src/pam_motd_overlay.c");
     println!("cargo:rerun-if-changed=src/pam_motd_overlay_versions.ldscript");
 
